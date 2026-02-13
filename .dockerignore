@@ -34,6 +34,8 @@ docs/
 # Tests
 tests/
 *.log
+*.log*
+coverage/
 
 # Outputs (se montarán como volúmenes)
 out/
@@ -50,3 +52,6 @@ docker-compose.yml
 # Misc
 .DS_Store
 Thumbs.db
+
+# Environment
+.env*

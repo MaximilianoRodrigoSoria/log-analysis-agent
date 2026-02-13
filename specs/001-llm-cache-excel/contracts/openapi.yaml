@@ -1,0 +1,135 @@
+openapi: 3.0.3
+info:
+  title: Log Analyzer API
+  version: 1.1.0
+  description: API para analisis de logs con LLM, cache local y reportes en Excel.
+servers:
+  - url: http://localhost:8080
+paths:
+  /:
+    get:
+      summary: Informacion del servicio
+      responses:
+        "200":
+          description: Informacion basica
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceInfo"
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /datasets:
+    get:
+      summary: Listar archivos de logs disponibles
+      responses:
+        "200":
+          description: Lista de datasets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetList"
+  /analyze:
+    post:
+      summary: Analizar logs y generar reportes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+      responses:
+        "200":
+          description: Analisis exitoso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+        "400":
+          description: Solicitud invalida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    ServiceInfo:
+      type: object
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        swagger_ui:
+          type: string
+        endpoints:
+          type: object
+        config:
+          type: object
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+    DatasetList:
+      type: object
+      properties:
+        status:
+          type: string
+        datasets:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+    AnalyzeRequest:
+      type: object
+      properties:
+        log_text:
+          type: string
+        log_filename:
+          type: string
+        run_id:
+          type: string
+    AnalyzeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        run_id:
+          type: string
+        report_paths:
+          type: object
+          additionalProperties:
+            type: string
+        analysis_path:
+          type: string
+        summary:
+          type: object
+          additionalProperties: true
+        report_format:
+          type: string
+          example: excel
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        error:
+          type: string

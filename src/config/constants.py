@@ -14,7 +14,37 @@ class Constants:
     
     # Extensiones y formatos
     REPORT_FILE_EXTENSION = ".md"
+    REPORT_FILE_EXTENSION_XLSX = ".xlsx"
     ANALYSIS_FILE_EXTENSION = ".json"
+
+    REPORT_FORMAT_EXCEL = "excel"
+    REPORT_FORMAT_MARKDOWN = "markdown"
+    REPORT_FORMAT_BOTH = "both"
+    REPORT_FORMAT_TXT = "txt"
+    REPORT_FORMAT_CSV = "csv"
+    REPORT_FORMAT_DOC = "doc"
+    
+    # MIME types para descarga
+    MIME_TYPE_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    MIME_TYPE_TXT = "text/plain"
+    MIME_TYPE_CSV = "text/csv"
+    MIME_TYPE_DOC = "application/msword"
+    
+    # Default MIME type para formatos
+    FORMAT_MIME_TYPES = {
+        REPORT_FORMAT_EXCEL: MIME_TYPE_EXCEL,
+        REPORT_FORMAT_TXT: MIME_TYPE_TXT,
+        REPORT_FORMAT_CSV: MIME_TYPE_CSV,
+        REPORT_FORMAT_DOC: MIME_TYPE_DOC,
+    }
+    
+    # Extensiones de archivo por formato
+    FORMAT_EXTENSIONS = {
+        REPORT_FORMAT_EXCEL: REPORT_FILE_EXTENSION_XLSX,
+        REPORT_FORMAT_TXT: ".txt",
+        REPORT_FORMAT_CSV: ".csv",
+        REPORT_FORMAT_DOC: ".doc",
+    }
     
     # Nombres default
     DEFAULT_LOG_FILE = "generated_logs.txt"
@@ -84,6 +114,8 @@ Usa formato Markdown profesional con secciones, bullets, code blocks y énfasis 
     LOG_REPORT_GENERATED = "Reporte generado exitosamente"
     LOG_CALLING_LLM = "Llamando a LLM para generar reporte"
     LOG_WRITING_OUTPUT = "Escribiendo archivos de salida"
+    LOG_CACHE_HIT = "Cache hit"
+    LOG_CACHE_MISS = "Cache miss"
     
     # Mensajes de error
     ERROR_FILE_NOT_FOUND = "No se encontró el archivo"

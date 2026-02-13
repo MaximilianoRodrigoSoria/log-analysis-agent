@@ -5,6 +5,7 @@ Implementa LogReaderPort para leer archivos locales.
 
 import logging
 from pathlib import Path
+from typing import List, Dict, Optional
 
 from ..ports.log_reader_port import LogReaderPort
 from ..config.constants import Constants
@@ -52,3 +53,46 @@ class FileSystemLogReader(LogReaderPort):
         except Exception as e:
             logger.error(f"Error al leer archivo {source}: {e}")
             raise IOError(f"Error al leer archivo: {e}") from e
+
+    def list_logs(self, directory: str) -> List[Dict[str, Optional[int]]]:
+        """
+        Lista todos los logs disponibles en un directorio.
+        
+        Args:
+            directory: Ruta del directorio a listar
+        
+        Returns:
+            Lista de diccionarios con {name: str, size_bytes: int, path: str}
+        
+        Raises:
+            FileNotFoundError: Si el directorio no existe
+            IOError: Si hay error de lectura del directorio
+        """
+        dir_path = Path(directory)
+        
+        if not dir_path.exists():
+            logger.error(f"{Constants.ERROR_FILE_NOT_FOUND}: {directory}")
+            raise FileNotFoundError(f"Directorio no encontrado: {directory}")
+        
+        if not dir_path.is_dir():
+            logger.error(f"La ruta no es un directorio: {directory}")
+            raise ValueError(f"La ruta no es un directorio: {directory}")
+        
+        logger.debug(f"Listando archivos en: {directory}")
+        
+        try:
+            logs = []
+            for file_path in sorted(dir_path.glob("*.txt")):
+                if file_path.is_file():
+                    logs.append({
+                        "name": file_path.name,
+                        "path": str(file_path.absolute()),
+                        "size_bytes": file_path.stat().st_size
+                    })
+            
+            logger.debug(f"Se encontraron {len(logs)} archivos de log")
+            return logs
+            
+        except Exception as e:
+            logger.error(f"Error al listar archivos en {directory}: {e}")
+            raise IOError(f"Error al listar directorio: {e}") from e

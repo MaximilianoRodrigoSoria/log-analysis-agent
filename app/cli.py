@@ -19,8 +19,9 @@ from src.config.settings import settings
 from src.config.constants import Constants
 from src.domain.use_cases import GenerateReportUseCase
 from src.adapters.log_reader_fs import FileSystemLogReader
-from src.adapters.analyzer_regex import RegexLogAnalyzer
-from src.adapters.llm_ollama import OllamaLLM
+from src.domain.log_analyzer.analyzer import LogAnalyzer
+from src.adapters.llm_factory import create_llm
+from src.adapters.cache_memory import MemoryCache
 from src.adapters.report_writer_fs import FileSystemReportWriter
 
 
@@ -90,14 +91,15 @@ Variables de entorno soportadas:
     print(f"[INFO] Log Analyzer CLI")
     print(f"[INFO] Archivo de entrada: {input_path}")
     print(f"[INFO] Directorio de salida: {settings.OUT_DIR}")
-    print(f"[INFO] Modelo LLM: {settings.OLLAMA_MODEL}")
+    print(f"[INFO] Proveedor LLM: {settings.LLM_PROVIDER}")
     print()
     
     try:
         # Componer dependencias (inyección manual)
         log_reader = FileSystemLogReader()
-        analyzer = RegexLogAnalyzer()
-        llm = OllamaLLM()
+        analyzer = LogAnalyzer()
+        llm = create_llm()
+        cache = MemoryCache()
         report_writer = FileSystemReportWriter()
         
         # Crear caso de uso
@@ -105,7 +107,8 @@ Variables de entorno soportadas:
             log_reader=log_reader,
             analyzer=analyzer,
             llm=llm,
-            report_writer=report_writer
+            report_writer=report_writer,
+            cache=cache
         )
         
         # Ejecutar
@@ -120,7 +123,9 @@ Variables de entorno soportadas:
         print("[OK] Analisis completado exitosamente!")
         print()
         print(f"Run ID: {result.run_id}")
-        print(f"Reporte Markdown: {result.report_path}")
+        print("Reportes:")
+        for report_format, report_path in result.report_paths.items():
+            print(f"  - {report_format}: {report_path}")
         print(f"Análisis JSON: {result.analysis_path}")
         print()
         print("Resumen:")

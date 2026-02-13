@@ -12,7 +12,9 @@
 [![Language](https://img.shields.io/badge/language-Spanish-red.svg)](README.md)
 [![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Sistema profesional de análisis de logs con generación automática de reportes usando LLM local (Ollama).
+Sistema profesional de análisis de logs con generación automática de reportes usando
+LLM local (Ollama) por defecto, con soporte para OpenAI, Anthropic y Google, cache
+in-memory y salida en Excel.
 
 Proyecto refactorizado con **arquitectura hexagonal (Ports & Adapters)** para máxima mantenibilidad y extensibilidad.
 
@@ -33,14 +35,22 @@ log_analyzer/
 │   │
 │   ├── ports/            # Interfaces (ABC)
 │   │   ├── llm_port.py
+│   │   ├── cache_port.py
 │   │   ├── log_reader_port.py
 │   │   ├── analyzer_port.py
 │   │   └── report_writer_port.py
 │   │
 │   ├── adapters/         # Implementaciones
+│   │   ├── llm_factory.py
 │   │   ├── llm_ollama.py
+│   │   ├── llm_openai.py
+│   │   ├── llm_anthropic.py
+│   │   ├── llm_google.py
+│   │   ├── cache_key.py
+│   │   ├── cache_memory.py
 │   │   ├── log_reader_fs.py
 │   │   ├── analyzer_regex.py
+│   │   ├── report_writer_excel.py
 │   │   └── report_writer_fs.py
 │   │
 │   └── config/           # Configuración centralizada
@@ -50,7 +60,7 @@ log_analyzer/
 │
 ├── datasets/             # Logs de ejemplo
 ├── out/                  # Outputs (generados en runtime)
-│   ├── reports/         # Reportes Markdown
+│   ├── reports/         # Reportes Excel/Markdown
 │   └── analysis/        # Análisis JSON
 │
 ├── requirements.txt
@@ -72,7 +82,8 @@ log_analyzer/
 ### Pre-requisitos
 
 1. **Python 3.7+**
-2. **Ollama** corriendo localmente
+2. **Ollama** corriendo localmente (si usas `LLM_PROVIDER=ollama`)
+3. **API keys** (opcional) para OpenAI, Anthropic o Google
    ```bash
    # Instalar Ollama: https://ollama.ai
    ollama pull mistral
@@ -123,7 +134,7 @@ python app/cli.py --input datasets/generated_logs.txt --log-level DEBUG
 [INFO] Log Analyzer CLI
 [INFO] Archivo de entrada: datasets\generated_logs.txt
 [INFO] Directorio de salida: out
-[INFO] Modelo LLM: mistral
+[INFO] Proveedor LLM: ollama (mistral)
 
 [INFO] Iniciando análisis...
 [INFO] [run_id=abc123] Iniciando generación de reporte
@@ -131,12 +142,12 @@ python app/cli.py --input datasets/generated_logs.txt --log-level DEBUG
 [INFO] [run_id=abc123] Analizando estructura del log
 [INFO] [run_id=abc123] Análisis completado: 10 eventos, 6 errores, 2 warnings
 [INFO] [run_id=abc123] Generando reporte con LLM
-[INFO] [run_id=abc123] Reporte generado exitosamente: out\reports\abc123.md
+[INFO] [run_id=abc123] Reporte generado exitosamente: out\reports\abc123.xlsx
 
 [OK] ✅ Análisis completado exitosamente!
 
 Run ID: abc123
-Reporte Markdown: C:\lab\log_analyzer\out\reports\abc123.md
+Reporte Excel: C:\lab\log_analyzer\out\reports\abc123.xlsx
 Análisis JSON: C:\lab\log_analyzer\out\analysis\abc123.json
 
 Resumen:
@@ -166,6 +177,58 @@ curl http://localhost:5000/
 curl http://localhost:5000/health
 ```
 
+**GET /datasets** - Lista de archivos de logs disponibles
+```bash
+curl http://localhost:5000/datasets
+```
+
+**Respuesta:**
+```json
+{
+  "status": "success",
+  "files": [
+    {
+      "name": "log1.txt",
+      "size_bytes": 2048,
+      "path": "/absolute/path/to/log1.txt"
+    },
+    {
+      "name": "log2.txt",
+      "size_bytes": 1024,
+      "path": "/absolute/path/to/log2.txt"
+    }
+  ],
+  "count": 2
+}
+```
+
+**POST /reports/download** - Generar y descargar reporte en formato
+
+```bash
+# Descargar múltiples logs como CSV
+curl -X POST http://localhost:5000/reports/download \
+  -H "Content-Type: application/json" \
+  -d '{
+    "report_name": "analisis_mensual",
+    "format": "csv",
+    "files": ["log1.txt", "log2.txt"]
+  }' \
+  -o analisis_mensual.csv
+
+# Formatos soportados: excel, txt, csv, doc
+```
+
+**Respuesta exitosa:**
+```json
+{
+  "status": "success",
+  "file_path": "/app/out/reports/abc123def456_report.csv",
+  "size_bytes": 4096,
+  "format": "csv",
+  "name": "analisis_mensual"
+}
+```
+
 **POST /analyze** - Analizar logs
 
 ```bash
@@ -190,8 +253,11 @@ curl -X POST http://localhost:5000/analyze \
 {
   "status": "success",
   "run_id": "abc123def456",
-  "report_path": "C:\\lab\\log_analyzer\\out\\reports\\abc123def456.md",
+  "report_paths": {
+    "excel": "C:\\lab\\log_analyzer\\out\\reports\\abc123def456.xlsx"
+  },
   "analysis_path": "C:\\lab\\log_analyzer\\out\\analysis\\abc123def456.json",
+  "report_format": "excel",
   "summary": {
     "total_events": 10,
     "total_errors": 6,
@@ -210,20 +276,34 @@ Todas las configuraciones se pueden sobrescribir con variables de entorno:
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
+| `LLM_PROVIDER` | `ollama` | Proveedor LLM (`ollama`, `openai`, `anthropic`, `google`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL de Ollama |
-| `OLLAMA_MODEL` | `mistral` | Modelo LLM a usar |
+| `OLLAMA_MODEL` | `mistral` | Modelo Ollama |
+| `OPENAI_API_KEY` | `""` | API key de OpenAI |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Modelo OpenAI |
+| `ANTHROPIC_API_KEY` | `""` | API key de Anthropic |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Modelo Anthropic |
+| `GOOGLE_API_KEY` | `""` | API key de Google |
+| `GOOGLE_MODEL` | `gemini-1.5-flash` | Modelo Google |
+| `CACHE_ENABLED` | `true` | Habilita cache in-memory |
+| `CACHE_TTL_SECONDS` | `60` | TTL del cache en segundos |
+| `REPORT_FORMAT` | `excel` | Formato de reporte (`excel`, `markdown`, `both`) |
 | `OUT_DIR` | `./out` | Directorio de salida |
+| `DATASETS_DIR` | `./datasets` | Directorio de datasets (logs disponibles) |
+| `REPORT_DOWNLOAD_MAX_FILES` | `10` | Máximo de archivos para descargar reportes |
 | `LOG_LEVEL` | `INFO` | Nivel de logging (DEBUG, INFO, WARN, ERROR) |
 | `REQUEST_TIMEOUT_SECONDS` | `120` | Timeout para requests HTTP |
 
 **Ejemplo:**
 ```bash
 # Windows CMD
+set LLM_PROVIDER=ollama
 set OLLAMA_MODEL=llama2
 set LOG_LEVEL=DEBUG
 python app/cli.py --input datasets/generated_logs.txt
 
 # Linux/Mac
+export LLM_PROVIDER=ollama
 export OLLAMA_MODEL=llama2
 export LOG_LEVEL=DEBUG
 python app/cli.py --input datasets/generated_logs.txt
@@ -265,7 +345,11 @@ Análisis estructurado determinista del log:
 }
 ```
 
-### 2. Reporte Markdown (`out/reports/<run_id>.md`)
+### 2. Reporte Excel (`out/reports/<run_id>.xlsx`)
+
+Reporte tabular con formato profesional, generado por defecto.
+
+### 3. Reporte Markdown (`out/reports/<run_id>.md`)
 
 Reporte profesional generado por el LLM con:
 - Resumen ejecutivo
@@ -307,15 +391,28 @@ El sistema envía los logs directamente al LLM. Si los logs contienen contenido 
 
 ## 🎯 Ejemplos Avanzados
 
-### Cambiar modelo LLM
+### Cambiar proveedor LLM (ej: OpenAI)
 ```bash
-set OLLAMA_MODEL=llama2
+set LLM_PROVIDER=openai
+set OPENAI_API_KEY=tu_api_key
 python app/cli.py --input datasets/generated_logs.txt
 ```
 
 ### Conectar a Ollama remoto
 ```bash
 set OLLAMA_BASE_URL=http://192.168.1.100:11434
+python app/cli.py --input datasets/generated_logs.txt
+```
+
+### Cambiar formato de reporte
+```bash
+set REPORT_FORMAT=both
+python app/cli.py --input datasets/generated_logs.txt
+```
+
+### Ajustar TTL del cache
+```bash
+set CACHE_TTL_SECONDS=120
 python app/cli.py --input datasets/generated_logs.txt
 ```
 
@@ -336,16 +433,11 @@ python app/cli.py --input datasets/generated_logs.txt --log-level DEBUG
 
 Gracias a la arquitectura hexagonal, puedes extender el sistema fácilmente:
 
-### Agregar nuevo adapter de LLM (ej: OpenAI)
+### Agregar nuevo adapter de LLM
 
-1. Crear `src/adapters/llm_openai.py` implementando `LLMPort`
-2. En `app/cli.py` o `app/api.py`, cambiar:
-   ```python
-   # De:
-   llm = OllamaLLM()
-   # A:
-   llm = OpenAILLM()
-   ```
+1. Crear un adapter en `src/adapters/` implementando `LLMPort`
+2. Registrar el adapter en `src/adapters/llm_factory.py`
+3. Usar `LLM_PROVIDER` para seleccionarlo sin tocar entrypoints
 
 ### Agregar lectura desde S3
 
@@ -427,12 +519,12 @@ Este proyecto es de código abierto para fines educativos y de laboratorio.
 
 - **Patrón**: Hexagonal (Ports & Adapters)
 - **Lenguaje**: Python 3.7+
-- **LLM**: Ollama (local)
+- **LLM**: Ollama (default), OpenAI, Anthropic, Google
 - **Framework API**: Flask
 - **Testing**: Arquitectura permite fácil testing con mocks de ports
 - **Logging**: `logging` estándar con run_id tracking
 - **Config**: Variables de entorno + defaults
-- **Output**: JSON (análisis) + Markdown (reporte)
+- **Output**: JSON (análisis) + Excel/Markdown (reporte)
 
 **Ventajas de esta arquitectura:**
 - ✅ Dominio desacoplado de infraestructura

@@ -4,6 +4,12 @@
 # HTTP client para Ollama
 requests==2.31.0
 
+# Excel report generation
+openpyxl==3.1.5
+
+# Word document generation
+python-docx==1.1.2
+
 # Framework web para API
 flask==3.0.0
 
@@ -23,6 +29,9 @@ itsdangerous==2.1.2
 pyyaml==6.0.1
 jsonschema==4.20.0
 mistune==3.0.2
+
+# Testing
+pytest==8.3.4
 
 # Utilidades estándar (ya incluidas en Python, listadas por completitud)
 # - logging (stdlib)

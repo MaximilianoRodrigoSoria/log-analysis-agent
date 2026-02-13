@@ -38,6 +38,9 @@ class OllamaLLM(LLMPort):
         self.model = model or settings.OLLAMA_MODEL
         self.timeout = timeout or settings.REQUEST_TIMEOUT_SECONDS
         self.generate_url = f"{self.base_url}/api/generate"
+
+        if not self.model:
+            raise ValueError("OLLAMA_MODEL no configurado")
         
         logger.debug(
             f"OllamaLLM inicializado: {self.base_url}, modelo={self.model}"

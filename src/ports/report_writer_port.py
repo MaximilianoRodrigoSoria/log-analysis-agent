@@ -4,7 +4,7 @@ Define la interfaz para persistir análisis y reportes.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Optional
 
 
 class ReportWriterPort(ABC):
@@ -25,13 +25,21 @@ class ReportWriterPort(ABC):
         pass
     
     @abstractmethod
-    def write_report(self, run_id: str, report_content: str) -> str:
+    def write_report(
+        self,
+        run_id: str,
+        report_content: str,
+        report_format: str = "markdown",
+        analysis: Optional[Dict] = None
+    ) -> str:
         """
-        Escribe el reporte en formato Markdown.
+        Escribe el reporte en el formato indicado.
         
         Args:
             run_id: Identificador único de la ejecución
-            report_content: Contenido del reporte en Markdown
+            report_content: Contenido del reporte
+            report_format: Formato de salida (markdown o excel)
+            analysis: Analisis estructurado para reportes tabulares
         
         Returns:
             Path del archivo generado

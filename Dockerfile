@@ -32,8 +32,12 @@ RUN mkdir -p out/reports out/analysis
 EXPOSE 8080
 
 # Variables de entorno por defecto
+ENV LLM_PROVIDER=ollama
 ENV OLLAMA_BASE_URL=http://host.docker.internal:11434
 ENV OLLAMA_MODEL=mistral
+ENV CACHE_ENABLED=true
+ENV CACHE_TTL_SECONDS=60
+ENV REPORT_FORMAT=excel
 ENV OUT_DIR=/app/out
 ENV LOG_LEVEL=INFO
 ENV REQUEST_TIMEOUT_SECONDS=120

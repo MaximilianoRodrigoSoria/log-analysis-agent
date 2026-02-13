@@ -27,10 +27,14 @@ import logging
 from src.config.logging_config import setup_logging
 from src.config.settings import settings
 from src.config.constants import Constants
-from src.domain.use_cases import GenerateReportUseCase
+from src.domain.use_cases import GenerateReportUseCase, ListLogsUseCase, DownloadReportUseCase
+from src.domain.analyze_use_case import AnalyzeLogUseCase
+from src.domain.dtos import AnalyzeRequest, ErrorResponse
+from src.domain.enums import OutputFormat
 from src.adapters.log_reader_fs import FileSystemLogReader
-from src.adapters.analyzer_regex import RegexLogAnalyzer
-from src.adapters.llm_ollama import OllamaLLM
+from src.domain.log_analyzer.analyzer import LogAnalyzer
+from src.adapters.llm_factory import create_llm
+from src.adapters.cache_memory import MemoryCache
 from src.adapters.report_writer_fs import FileSystemReportWriter
 
 
@@ -85,15 +89,37 @@ swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
 # Componer dependencias (singleton para la app)
 log_reader = FileSystemLogReader()
-analyzer = RegexLogAnalyzer()
-llm = OllamaLLM()
+analyzer = LogAnalyzer()
+llm = create_llm()
+cache = MemoryCache()
 report_writer = FileSystemReportWriter()
 
 use_case = GenerateReportUseCase(
     log_reader=log_reader,
     analyzer=analyzer,
     llm=llm,
-    report_writer=report_writer
+    report_writer=report_writer,
+    cache=cache
+)
+
+list_logs_use_case = ListLogsUseCase(
+    log_reader=log_reader
+)
+
+download_report_use_case = DownloadReportUseCase(
+    log_reader=log_reader,
+    analyzer=analyzer,
+    llm=llm,
+    report_writer=report_writer,
+    cache=cache,
+    max_files=settings.REPORT_DOWNLOAD_MAX_FILES
+)
+
+analyze_use_case = AnalyzeLogUseCase(
+    log_reader=log_reader,
+    analyzer=analyzer,
+    llm=llm,
+    cache=cache
 )
 
 
@@ -126,12 +152,14 @@ def index():
         "swagger_ui": "http://localhost:8080/apidocs",
         "endpoints": {
             "/datasets": "GET - Lista archivos de logs disponibles",
+            "/reports/download": "POST - Descarga reporte en formato (excel, txt, csv, doc)",
             "/analyze": "POST - Analiza logs y genera reporte"
         },
         "config": {
             "ollama_model": settings.OLLAMA_MODEL,
             "ollama_url": settings.OLLAMA_BASE_URL,
-            "output_dir": str(settings.OUT_DIR)
+            "output_dir": str(settings.OUT_DIR),
+            "datasets_dir": str(settings.DATASETS_DIR)
         }
     })
 
@@ -152,37 +180,47 @@ def list_datasets():
             status:
               type: string
               example: success
-            datasets:
+            files:
               type: array
               items:
-                type: string
-              example: ["generated_logs.txt", "app_errors.txt"]
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: generated_logs.txt
+                  size_bytes:
+                    type: integer
+                    example: 1024
+                  path:
+                    type: string
+                    example: /absolute/path/to/generated_logs.txt
             count:
               type: integer
               example: 2
+      404:
+        description: Directorio de datasets no existe
+      500:
+        description: Error interno del servidor
     """
     try:
-        # Path absoluto al directorio datasets
-        datasets_dir = Path(__file__).parent.parent / "datasets"
-        
-        if not datasets_dir.exists():
-            return jsonify({
-                Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-                Constants.API_RESPONSE_ERROR: "Directorio datasets/ no existe"
-            }), 404
-        
-        # Listar archivos .txt
-        files = [f.name for f in datasets_dir.glob("*.txt")]
-        files.sort()
+        # Usar el use case para listar logs
+        result = list_logs_use_case.execute(str(settings.DATASETS_DIR))
         
         return jsonify({
             Constants.API_RESPONSE_STATUS: Constants.STATUS_SUCCESS,
-            "datasets": files,
-            "count": len(files)
+            "files": result["files"],
+            "count": result["count"]
         }), 200
         
+    except FileNotFoundError as e:
+        logger.error(f"Error al listar datasets: directorio no encontrado: {e}")
+        return jsonify({
+            Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
+            Constants.API_RESPONSE_ERROR: "Directorio de datasets no existe"
+        }), 404
+        
     except Exception as e:
-        logger.error(f"Error al listar datasets: {e}")
+        logger.error(f"Error al listar datasets: {e}", exc_info=True)
         return jsonify({
             Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
             Constants.API_RESPONSE_ERROR: str(e)
@@ -192,7 +230,7 @@ def list_datasets():
 @app.route(Constants.API_ENDPOINT_ANALYZE, methods=["POST"])
 def analyze():
     """
-    Analiza logs y genera reporte completo en Markdown
+    Analiza logs y descarga el reporte en formato configurable
     ---
     tags:
       - Análisis
@@ -200,171 +238,216 @@ def analyze():
       - in: body
         name: body
         required: true
-        description: Solicitud de análisis de logs
+        description: |
+          Solicitud de análisis de logs con descarga automática.
+          
+          **Formatos disponibles:**
+          - `excel` - Archivo Excel (.xlsx) con tablas formateadas
+          - `csv` - Archivo CSV con datos tabulares
+          - `txt` - Archivo de texto plano
+          - `markdown` - Archivo Markdown con formato
+          - `doc` - Archivo Word (.docx) - requiere python-docx instalado
         schema:
           type: object
           required:
-            - log_filename
+            - input_log_filename
+            - output_filename
+            - output_format
           properties:
-            log_filename:
+            input_log_filename:
               type: string
-              description: Nombre del archivo .txt en datasets/
+              description: Nombre del archivo de log en datasets/
               example: generated_logs.txt
-            run_id:
+            output_filename:
               type: string
-              description: Nombre del archivo de salida (requerido)
-              example: mi-analisis-001
-        examples:
-          ejemplo_basico:
-            summary: Análisis básico
-            value:
-              log_filename: generated_logs.txt
-          ejemplo_con_id:
-            summary: Análisis con run_id personalizado
-            value:
-              log_filename: generated_logs.txt
-              run_id: produccion-2026-02-13
+              description: Nombre del archivo de salida (sin extensión)
+              example: informe_produccion
+            output_format:
+              type: string
+              description: Formato de salida del reporte
+              enum: [excel, csv, txt, markdown, doc]
+              example: excel
+          example:
+            input_log_filename: generated_logs.txt
+            output_filename: informe_produccion
+            output_format: excel
     responses:
       200:
-        description: Descarga directa del archivo de reporte en Markdown
+        description: Descarga directa del archivo generado
         content:
-          text/markdown:
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
             schema:
               type: string
               format: binary
+          text/csv:
+            schema:
+              type: string
+          application/msword:
+            schema:
+              type: string
+              format: binary
+          text/plain:
+            schema:
+              type: string
+          text/markdown:
+            schema:
+              type: string
       400:
-        description: Error de validación en la solicitud
+        description: Error de validación
         schema:
           type: object
           properties:
-            status:
+            code:
+              type: integer
+              example: 400
+            message:
               type: string
-              example: error
-            error:
+              example: Error de validación
+            details:
               type: string
-              example: Campo 'log_filename' es requerido
-        examples:
-          sin_filename:
-            summary: Falta log_filename
-            value:
-              status: error
-              error: Campo 'log_filename' es requerido
+            run_id:
+              type: string
+              nullable: true
       404:
         description: Archivo de log no encontrado
         schema:
           type: object
           properties:
-            status:
+            code:
+              type: integer
+              example: 404
+            message:
               type: string
-              example: error
-            error:
+              example: Archivo no encontrado
+            details:
               type: string
-              example: Archivo 'app.log' no existe en datasets/
-      503:
-        description: No se puede conectar a Ollama
+            run_id:
+              type: string
+      500:
+        description: Error interno del servidor
         schema:
           type: object
           properties:
-            status:
+            code:
+              type: integer
+              example: 500
+            message:
               type: string
-              example: error
-            error:
+              example: Error interno del servidor
+            details:
               type: string
-              example: No se puede conectar a Ollama en http://localhost:11434
-      504:
-        description: Timeout al procesar el request
-        schema:
-          type: object
-          properties:
-            status:
+            run_id:
               type: string
-              example: error
-            error:
-              type: string
-              example: Timeout después de 120s al procesar request
     """
+    run_id = None
+    
     try:
         # Validar Content-Type
         if not request.is_json:
-            return jsonify({
-                Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-                Constants.API_RESPONSE_ERROR: "Content-Type debe ser application/json"
-            }), 400
+            error = ErrorResponse(
+                code=400,
+                message="Content-Type debe ser application/json",
+                details=None
+            )
+            return jsonify(error.to_dict()), 400
         
         # Obtener datos del request
         data = request.get_json()
         
-        # Validar campo requerido: log_filename
-        log_filename = data.get("log_filename")
-        if not log_filename:
-            return jsonify({
-                Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-                Constants.API_RESPONSE_ERROR: "Campo 'log_filename' es requerido"
-            }), 400
+        # Parsear y validar request usando DTO
+        try:
+            analyze_request = AnalyzeRequest.from_dict(data)
+            run_id = analyze_request.run_id
+        except ValueError as e:
+            logger.error(f"Error de validación: {e}")
+            error = ErrorResponse(
+                code=400,
+                message="Error de validación",
+                details=str(e),
+                run_id=run_id
+            )
+            return jsonify(error.to_dict()), 400
         
-        # run_id requerido - será el nombre del archivo de salida
-        run_id = data.get(Constants.API_FIELD_RUN_ID)
-        if not run_id:
-            return jsonify({
-                Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-                Constants.API_RESPONSE_ERROR: "Campo 'run_id' es requerido"
-            }), 400
-        
-        # Construir path absoluto al archivo
-        datasets_dir = Path(__file__).parent.parent / "datasets"
-        log_path = datasets_dir / log_filename
-        
-        if not log_path.exists():
-            return jsonify({
-                Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-                Constants.API_RESPONSE_ERROR: f"Archivo '{log_filename}' no existe en datasets/"
-            }), 404
-        
-        logger.info(f"Recibido request de análisis (log_filename: {log_filename}, run_id: {run_id})")
+        logger.info(
+            f"[{run_id}] Solicitud de análisis recibida: "
+            f"input={analyze_request.input_log_filename}, "
+            f"output={analyze_request.output_filename}.{analyze_request.output_format.value}"
+        )
         
         # Ejecutar caso de uso
-        result = use_case.execute(
-            log_path=str(log_path),
-            run_id=run_id
+        response = analyze_use_case.execute(analyze_request)
+        
+        # Si la respuesta tiene status error, retornar el error apropiado
+        if response.status == 'error':
+            # Determinar código de error según el mensaje
+            status_code = 500
+            
+            if "no encontrado" in response.errors.lower() or "no existe" in response.errors.lower():
+                status_code = 404
+            elif "timeout" in response.errors.lower():
+                status_code = 504
+            elif "conectar" in response.errors.lower():
+                status_code = 503
+            
+            error = ErrorResponse(
+                code=status_code,
+                message=response.errors,
+                details=None,
+                run_id=run_id
+            )
+            return jsonify(error.to_dict()), status_code
+        
+        # Respuesta exitosa: descargar archivo
+        logger.info(f"[{run_id}] Análisis completado exitosamente: {response.output_path}")
+        
+        # Determinar MIME type según formato
+        mime_type = Constants.FORMAT_MIME_TYPES.get(
+            response.output_format, 
+            'application/octet-stream'
         )
         
-        logger.info(f"Análisis completado exitosamente: run_id={result.run_id}")
+        # Obtener extensión del archivo
+        from pathlib import Path
+        output_file = Path(response.output_path)
+        download_name = f"{analyze_request.output_filename}{output_file.suffix}"
         
-        # Retornar el archivo Markdown directamente para descarga
+        # Enviar archivo para descarga
         return send_file(
-            result.report_path,
-            mimetype='text/markdown',
+            response.output_path,
+            mimetype=mime_type,
             as_attachment=True,
-            download_name=f"{result.run_id}.md"
+            download_name=download_name
         )
-        
-    except ValueError as e:
-        logger.error(f"Error de validación: {e}")
-        return jsonify({
-            Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-            Constants.API_RESPONSE_ERROR: str(e)
-        }), 400
         
     except ConnectionError as e:
-        logger.error(f"Error de conexión: {e}")
-        return jsonify({
-            Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-            Constants.API_RESPONSE_ERROR: f"No se puede conectar a Ollama: {e}"
-        }), 503
+        logger.error(f"[{run_id}] Error de conexión: {e}")
+        error = ErrorResponse(
+            code=503,
+            message="No se puede conectar al proveedor LLM",
+            details=str(e),
+            run_id=run_id
+        )
+        return jsonify(error.to_dict()), 503
         
     except TimeoutError as e:
-        logger.error(f"Timeout: {e}")
-        return jsonify({
-            Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-            Constants.API_RESPONSE_ERROR: f"Timeout al procesar request: {e}"
-        }), 504
+        logger.error(f"[{run_id}] Timeout: {e}")
+        error = ErrorResponse(
+            code=504,
+            message="Timeout al procesar request",
+            details=str(e),
+            run_id=run_id
+        )
+        return jsonify(error.to_dict()), 504
         
     except Exception as e:
-        logger.error(f"Error inesperado: {e}", exc_info=True)
-        return jsonify({
-            Constants.API_RESPONSE_STATUS: Constants.STATUS_ERROR,
-            Constants.API_RESPONSE_ERROR: f"Error interno del servidor: {str(e)}"
-        }), 500
+        logger.error(f"[{run_id}] Error inesperado: {e}", exc_info=True)
+        error = ErrorResponse(
+            code=500,
+            message="Error interno del servidor",
+            details=str(e),
+            run_id=run_id
+        )
+        return jsonify(error.to_dict()), 500
 
 
 @app.route("/health", methods=["GET"])
@@ -397,6 +480,11 @@ def health():
     }), 200
 
 
+def create_app():
+    """Factory function para crear la aplicación Flask (útil para testing)"""
+    return app
+
+
 def main():
     """Inicia el servidor Flask"""
     print("=" * 60)
@@ -407,8 +495,8 @@ def main():
     print(f"  Modelo: {settings.OLLAMA_MODEL}")
     print(f"  Output: {settings.OUT_DIR}")
     print()
-    print(f"  ⚠️  {Constants.SECURITY_WARNING_API}")
-    print(f"  ⚠️  {Constants.SECURITY_WARNING_PROMPT_INJECTION}")
+    print("  WARNING: " + Constants.SECURITY_WARNING_API)
+    print("  WARNING: " + Constants.SECURITY_WARNING_PROMPT_INJECTION)
     print()
     print("=" * 60)
     print()
@@ -416,6 +504,7 @@ def main():
     print("  GET  /           - Info de la API")
     print("  GET  /health     - Health check")
     print("  GET  /datasets   - Listar archivos disponibles")
+    print("  POST /reports/download - Descargar reporte en formato")
     print("  POST /analyze    - Analizar logs")
     print()
     print("Swagger UI: http://localhost:8080/apidocs")
