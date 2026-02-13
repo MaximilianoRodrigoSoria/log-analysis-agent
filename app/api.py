@@ -487,6 +487,13 @@ def create_app():
 
 def main():
     """Inicia el servidor Flask"""
+    import sys
+    import io
+    
+    # Configurar encoding UTF-8 para stdout en Windows
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
     print("=" * 60)
     print("  Log Analyzer API")
     print("=" * 60)
@@ -495,8 +502,9 @@ def main():
     print(f"  Modelo: {settings.OLLAMA_MODEL}")
     print(f"  Output: {settings.OUT_DIR}")
     print()
-    print("  WARNING: " + Constants.SECURITY_WARNING_API)
-    print("  WARNING: " + Constants.SECURITY_WARNING_PROMPT_INJECTION)
+    # Usar versión sin emojis para compatibilidad Windows
+    print("  WARNING: Esta API no tiene autenticacion. No exponer en produccion sin seguridad.")
+    print("  WARNING: Riesgo de prompt injection si los logs contienen instrucciones maliciosas.")
     print()
     print("=" * 60)
     print()

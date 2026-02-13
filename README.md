@@ -491,6 +491,16 @@ ollama pull mistral
 set REQUEST_TIMEOUT_SECONDS=300
 ```
 
+### Error: "No module named 'docx'"
+El formato DOC requiere `python-docx` (ya incluido en requirements.txt):
+```bash
+pip install python-docx
+```
+**Nota:** Los formatos Excel, CSV, TXT y Markdown funcionan sin esta dependencia gracias a **lazy imports**.
+
+### Error de encoding en Windows
+Si ves `UnicodeEncodeError` en la consola, el servidor lo maneja automáticamente desde la versión actual.
+
 ### Logs con formato diferente
 El analyzer usa regex específicos para logs tipo Java/Spring. Para otros formatos:
 1. Crear un nuevo analyzer implementando `AnalyzerPort`
