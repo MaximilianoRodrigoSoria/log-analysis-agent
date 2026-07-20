@@ -566,3 +566,45 @@ Para consultas, sugerencias o contribuciones al proyecto.
 ---
 
 **Happy logging! 📊🚀**
+
+---
+
+<!-- diagrama-mermaid -->
+## 📊 Diagrama de arquitectura
+
+```mermaid
+flowchart TD
+    subgraph Entrypoints["🚪 Entrypoints"]
+        CLI["CLI · app/cli.py"]
+        API["API REST Flask · app/api.py"]
+    end
+
+    UC["AnalyzeUseCase<br/>(src/domain)"]
+
+    subgraph Ports["🔌 Ports (interfaces)"]
+        P1["LogReaderPort"]
+        P2["AnalyzerPort"]
+        P3["LLMPort"]
+        P4["CachePort"]
+        P5["ReportExporterPort"]
+    end
+
+    subgraph Adapters["🧩 Adapters (implementaciones)"]
+        A1["log_reader_fs"]
+        A2["analyzer_regex"]
+        A3["llm_factory<br/>Ollama · OpenAI · Anthropic · Google"]
+        A4["cache_memory"]
+        A5["report_exporter<br/>Excel · CSV · Markdown · TXT · DOC"]
+    end
+
+    OUT["📄 Reporte<br/>(Excel / CSV / MD / ...)"]
+
+    CLI --> UC
+    API --> UC
+    UC --> P1 --> A1
+    UC --> P2 --> A2
+    UC --> P3 --> A3
+    UC --> P4 --> A4
+    UC --> P5 --> A5
+    A5 --> OUT
+```
